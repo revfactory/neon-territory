@@ -24,7 +24,11 @@
       inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') this.submitName(); });
       ['#lobby-name', '#lobby-code'].forEach((sel) => {
         const el = $(sel);
-        el.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') this.action(sel === '#lobby-code' ? 'mp-join' : 'mp-create'); });
+        el.addEventListener('keydown', (e) => {
+          e.stopPropagation();
+          if (e.isComposing || e.keyCode === 229) return; // 한글 입력기 조합 중 Enter 는 확정용이므로 무시
+          if (e.key === 'Enter') this.action(sel === '#lobby-code' ? 'mp-join' : 'mp-create');
+        });
       });
       $('#lobby-code').addEventListener('input', () => { const el = $('#lobby-code'); el.value = el.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4); });
       $('#lobby-name').value = Storage.settings.nick || '';
@@ -52,7 +56,8 @@
           const n = this.nick(), code = ($('#lobby-code').value || '').toUpperCase().trim();
           if (!n) break;
           if (code.length < 4) { this.lobbyStatus('방 코드 4자를 입력해 주세요', true); break; }
-          Net.connect().then(() => Net.join(code, n)).catch(() => {});
+          const method = code === this.linkCode ? 'link' : 'code';
+          Net.connect().then(() => Net.join(code, n, method)).catch(() => {});
           break;
         }
         case 'mp-ready': { const l = Net.lobby, me = l && l.players.find((p) => p.pid === l.you); Net.ready(!(me && me.ready)); break; }
@@ -271,7 +276,7 @@
       Storage.setSetting('nick', v);
       return v;
     },
-    setJoinCode(code) { $('#lobby-code').value = String(code || '').toUpperCase().slice(0, 4); },
+    setJoinCode(code) { this.linkCode = String(code || '').toUpperCase().slice(0, 4); $('#lobby-code').value = this.linkCode; },
     lobbyStatus(text, bad) {
       const el = $('#lobby-status');
       el.textContent = text || '';

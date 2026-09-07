@@ -2,6 +2,7 @@
 (function () {
   const Net = {
     ws: null, pid: null, room: null, lobby: null, name: '', leaving: false, connecting: null, hb: null, game: null,
+    pending: null, // 애널리틱스: 방 만들기/참가 요청이 서버에서 확정되면 이벤트를 보낸다
     onLobby: null, onStart: null, onError: null, onStatus: null, onLeft: null,
     url() { return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws'; },
     status(s, bad) { if (this.onStatus) this.onStatus(s, bad); },
@@ -48,8 +49,8 @@
       this.connect().then(() => this.send({ t: 'join', code, name: this.name, pid }), () => {});
     },
     send(m) { if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(m)); },
-    create(name) { this.name = name; this.leaving = false; this.send({ t: 'create', name }); },
-    join(code, name) { this.name = name; this.leaving = false; this.send({ t: 'join', code, name }); },
+    create(name) { this.name = name; this.leaving = false; this.pending = { type: 'create' }; this.send({ t: 'create', name }); },
+    join(code, name, method) { this.name = name; this.leaving = false; this.pending = { type: 'join', code, method: method || 'code' }; this.send({ t: 'join', code, name }); },
     ready(on) { this.send({ t: 'ready', on: !!on }); },
     setBots(n) { this.send({ t: 'bots', n }); },
     start() { this.send({ t: 'start' }); },
@@ -65,10 +66,24 @@
       try { m = JSON.parse(raw); } catch (e) { return; }
       switch (m.t) {
         case 'welcome': this.pid = m.pid; break;
-        case 'lobby': this.room = m.code; this.lobby = m; if (this.onLobby) this.onLobby(m); break;
+        case 'lobby':
+          this.room = m.code; this.lobby = m;
+          if (this.pending) {
+            const p = this.pending; this.pending = null;
+            if (p.type === 'create') Analytics.track('mp_room_create', { room_code: m.code, bots: m.bots });
+            else Analytics.track('mp_room_join', { room_code: m.code, method: p.method, players: m.players.length, bots: m.bots });
+          }
+          if (this.onLobby) this.onLobby(m);
+          break;
         case 'start': if (this.onStart) this.onStart(m); break;
         case 'tick': if (this.game) this.game.applyTick(m); break;
-        case 'error': if (this.onError) this.onError(m.msg); break;
+        case 'error':
+          if (this.pending) {
+            const p = this.pending; this.pending = null;
+            Analytics.track(p.type === 'join' ? 'mp_room_join_failed' : 'mp_room_create_failed', { room_code: p.code || '', method: p.method || '', reason: m.msg });
+          }
+          if (this.onError) this.onError(m.msg);
+          break;
         case 'left': this.room = null; this.lobby = null; this.pid = null; this.game = null; if (this.onLeft) this.onLeft(); break;
         default: break;
       }
