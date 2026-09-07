@@ -104,6 +104,8 @@ button { font-family: inherit; }
 .neon-h.magenta { text-shadow: 0 0 6px #fff, 0 0 16px var(--c2), 0 0 40px var(--c2); }
 .neon-h.danger { text-shadow: 0 0 6px #fff, 0 0 16px var(--danger), 0 0 40px var(--danger); }
 .neon-h.gold { text-shadow: 0 0 6px #fff, 0 0 16px var(--c4), 0 0 40px var(--c4); }
+.neon-h.lime { text-shadow: 0 0 6px #fff, 0 0 16px var(--c3), 0 0 40px var(--c3); }
+.btn.lime { border-color: var(--c3); color: var(--c3); background: rgba(124, 255, 0, .08); box-shadow: 0 0 12px rgba(124, 255, 0, .5), inset 0 0 12px rgba(124, 255, 0, .15); text-shadow: 0 0 8px var(--c3); }
 .settings { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 6px; }
 .tog { font-family: var(--font-k); font-size: 12px; padding: 8px 12px; border-radius: 20px; border: 1px solid rgba(255, 255, 255, .35); background: rgba(255, 255, 255, .06); color: #fff; cursor: pointer; }
 .tog.off { opacity: .5; text-decoration: line-through; }
@@ -174,3 +176,35 @@ button { font-family: inherit; }
   .logo-main { font-size: 44px; } .btn { padding: 10px 20px; font-size: 15px; } .menu { gap: 8px; } .screen { gap: 8px; }
   .howto { display: none; } .stars { font-size: 40px; } .stage-grid { max-height: 56vh; }
 }
+
+/* ---- 멀티플레이 로비 / 결과 ---- */
+.lobby-status { font-size: 13px; color: rgba(255, 255, 255, .8); min-height: 20px; max-width: 92vw; word-break: break-all; }
+.lobby-status.bad { color: #ff6b7a; text-shadow: 0 0 8px var(--danger); }
+.lobby-entry { display: flex; flex-direction: column; gap: 12px; width: min(320px, 86vw); align-items: stretch; }
+.lobby-entry input, .lobby-entry .row { width: 100%; }
+.lobby-entry input, #lobby-code { font-family: var(--font-d); font-weight: 700; font-size: 18px; text-align: center; letter-spacing: .12em; background: rgba(0, 0, 0, .5); border: 2px solid var(--c3); border-radius: 8px; color: #fff; padding: 10px; box-shadow: 0 0 10px rgba(124, 255, 0, .4); outline: none; -webkit-user-select: text; user-select: text; }
+.lobby-entry input::placeholder { color: rgba(255, 255, 255, .35); letter-spacing: 0; font-family: var(--font-k); font-weight: 400; }
+.lobby-entry .row { flex-wrap: nowrap; }
+.lobby-entry .row input { flex: 1; min-width: 0; text-transform: uppercase; }
+.lobby-or { font-size: 12px; opacity: .6; }
+.lobby-room { display: flex; flex-direction: column; gap: 12px; width: min(380px, 92vw); align-items: center; }
+.room-code { font-size: 14px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.room-code b { font-family: var(--font-d); font-weight: 900; font-size: 34px; letter-spacing: .3em; margin-left: .3em; color: #fff; text-shadow: 0 0 8px #fff, 0 0 20px var(--c3), 0 0 40px var(--c3); }
+.room-players { width: 100%; display: flex; flex-direction: column; gap: 6px; }
+.lp { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 10px; background: rgba(0, 0, 0, .45); border: 1px solid rgba(255, 255, 255, .15); font-size: 15px; }
+.lp i { width: 12px; height: 12px; border-radius: 50%; box-shadow: 0 0 8px currentColor; flex: none; }
+.lp.bot i { background: rgba(255, 255, 255, .3); box-shadow: none; }
+.lp .nm { flex: 1; text-align: left; font-weight: 700; }
+.lp .nm em { font-style: normal; font-size: 12px; opacity: .7; }
+.lp .st { font-size: 12px; opacity: .6; }
+.lp .st.ok { color: var(--c3); opacity: 1; text-shadow: 0 0 6px var(--c3); }
+.lp.off { opacity: .4; }
+.lp.bot { opacity: .7; }
+.room-opts { display: flex; flex-direction: column; gap: 6px; align-items: center; font-size: 13px; }
+.room-opts.dim select { opacity: .6; }
+.room-opts select { font-family: var(--font-k); font-size: 14px; margin-left: 6px; padding: 6px 10px; border-radius: 8px; background: rgba(0, 0, 0, .5); color: #fff; border: 1px solid var(--c3); }
+.room-rule { font-size: 11px; opacity: .6; }
+#match-board { max-height: 44vh; }
+#match-board .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; box-shadow: 0 0 6px currentColor; }
+#match-board tr.me td { background: rgba(124, 255, 0, .08); }
+#match-board s { opacity: .6; font-size: 11px; margin-left: 4px; }

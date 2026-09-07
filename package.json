@@ -1,0 +1,17 @@
+{
+  "name": "neon-territory",
+  "version": "1.1.0",
+  "private": true,
+  "description": "네온 땅따먹기 — 모바일 웹 3D 땅따먹기 게임 (싱글 + 최대 5명 멀티플레이)",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "ws": "^8.18.0"
+  }
+}

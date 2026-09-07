@@ -1,4 +1,4 @@
-/* 게임 규칙 — 개체 이동, 궤적/충돌, 포위 점령, 점수, 스테이지 흐름 */
+/* 게임 규칙 — 개체 이동, 궤적/충돌, 포위 점령, 점수, 스테이지 흐름, 멀티플레이 승패 */
 (function () {
   const DIRS = window.DIRS;
 
@@ -9,38 +9,56 @@
       this.speed = 5; this.alive = false; this.trail = []; this.respawnTimer = 0;
       this.kills = 0; this.deaths = 0; this.stopped = true; this.ai = null; this.protect = 0;
       this.lastX = 0; this.lastY = 0;
+      /* 사람 개체는 목숨·점수·통계를 개체마다 따로 센다 (멀티플레이 대응) */
+      this.lives = 0; this.maxLives = 0; this.score = 0; this.killScore = 0;
+      this.stats = { captured: 0, kills: 0, deaths: 0, biggest: 0 };
+      this.out = false;      // 멀티: 목숨을 모두 잃어 탈락
+      this.connected = true; // 멀티: 접속 상태 (끊기면 AI가 대신 조종)
     }
   }
 
   class Game {
+    /* opts: { demo, runScore, lives, multi, players: [{ id, name, color }] } */
     constructor(cfg, opts) {
       opts = opts || {};
-      this.cfg = cfg; this.demo = !!opts.demo;
+      this.cfg = cfg; this.demo = !!opts.demo; this.multi = !!opts.multi;
+      this.players = opts.players || null;
       this.runScore = opts.runScore || 0;
-      this.lives = opts.lives || 3; this.maxLives = this.lives;
-      this.score = 0; this.killScore = 0; this.time = cfg.time; this.elapsed = 0;
+      this.startLives = opts.lives || 3;
+      this.time = cfg.time; this.elapsed = 0;
       this.state = 'idle'; this.listeners = {};
-      this.entities = []; this.byId = [];
+      this.entities = []; this.byId = []; this.player = null;
       this.introTimer = 0; this.introStep = 0; this.overTimer = 0; this.warned = -1;
-      this.stats = { captured: 0, kills: 0, deaths: 0, biggest: 0 };
       this.pendingReason = '';
     }
+    /* 단일 플레이 화면이 읽는 값은 내 개체(player)의 값을 그대로 돌려준다 */
+    get score() { return this.player ? this.player.score : 0; }
+    get killScore() { return this.player ? this.player.killScore : 0; }
+    get lives() { return this.player ? this.player.lives : 0; }
+    get maxLives() { return this.player ? this.player.maxLives : 0; }
+    get stats() { return this.player ? this.player.stats : { captured: 0, kills: 0, deaths: 0, biggest: 0 }; }
+
     on(ev, fn) { (this.listeners[ev] || (this.listeners[ev] = [])).push(fn); return this; }
     emit(ev, d) { const l = this.listeners[ev]; if (l) for (let i = 0; i < l.length; i++) l[i](d); }
 
     start() {
       const cfg = this.cfg;
       this.grid = new Territory(cfg.grid, cfg.grid);
-      const player = new Entity(1, true, window.PLAYER_COLOR, 'YOU');
-      player.speed = cfg.playerSpeed;
-      this.player = player; this.entities.push(player);
+      const humans = this.multi ? this.players : [{ id: 1, name: 'YOU', color: window.PLAYER_COLOR }];
+      for (const p of humans) {
+        const e = new Entity(p.id, true, p.color, p.name);
+        e.speed = cfg.playerSpeed; e.lives = e.maxLives = this.startLives;
+        this.entities.push(e);
+      }
+      this.player = this.entities[0];
+      const botColors = cfg.botColors || window.ENEMY_COLORS;
       for (let k = 0; k < cfg.enemies; k++) {
-        const e = new Entity(2 + k, false, window.ENEMY_COLORS[k % 6], 'BOT ' + (k + 1));
+        const e = new Entity(humans.length + 1 + k, false, botColors[k % botColors.length], 'BOT ' + (k + 1));
         e.speed = cfg.enemySpeed * (0.92 + Math.random() * 0.16);
         e.ai = new EnemyAI(e, this, cfg);
         this.entities.push(e);
       }
-      if (this.demo) { player.ai = new EnemyAI(player, this, cfg); player.speed = cfg.enemySpeed; }
+      if (this.demo) { this.player.ai = new EnemyAI(this.player, this, cfg); this.player.speed = cfg.enemySpeed; }
       for (const e of this.entities) this.byId[e.id] = e;
       const taken = [];
       for (const e of this.entities) {
@@ -54,6 +72,8 @@
       this.emit('start', {});
     }
     setPlayerDir(d) { if (this.player.ai) return; this.player.nextDir = d; }
+    /* 멀티: 개체 id 로 방향 입력 */
+    setDir(id, d) { const e = this.byId[id]; if (e && e.isPlayer && !e.ai) e.nextDir = d; }
     canMove(e, d) {
       const nx = e.x + DIRS[d].x, ny = e.y + DIRS[d].y;
       if (!this.grid.inBounds(nx, ny)) return false;
@@ -69,7 +89,7 @@
     summary() {
       return {
         stageId: this.cfg.id, score: this.score, runScore: this.runScore,
-        total: this.runScore + this.score, percent: this.grid.percent(1),
+        total: this.runScore + this.score, percent: this.grid.percent(this.player.id),
         target: this.cfg.target, stats: this.stats, lives: this.lives, time: this.time
       };
     }
@@ -98,7 +118,9 @@
         const secs = Math.ceil(this.time);
         if (secs <= 10 && secs > 0 && secs !== this.warned) { this.warned = secs; this.emit('warning', { secs }); }
         if (this.time <= 0) {
-          this.time = 0; this.state = 'over';
+          this.time = 0;
+          if (this.multi) { this.finish('time', null); return; }
+          this.state = 'over';
           this.emit('gameOver', Object.assign({ reason: 'time' }, this.summary()));
           return;
         }
@@ -109,7 +131,7 @@
       for (let k = 0; k < this.entities.length; k++) {
         const e = this.entities[k];
         if (skipPlayer && e.isPlayer) continue;
-        if (!e.alive) { e.respawnTimer -= dt; if (e.respawnTimer <= 0) this.respawn(e); continue; }
+        if (!e.alive) { if (e.out) continue; e.respawnTimer -= dt; if (e.respawnTimer <= 0) this.respawn(e); continue; }
         if (e.protect > 0) e.protect -= dt;
         if (e.stopped) {
           if (e.ai || e.nextDir >= 0) this.chooseDir(e);
@@ -175,16 +197,18 @@
       if (e.isPlayer && !this.demo) {
         mult = count >= 150 ? 4 : count >= 80 ? 3 : count >= 30 ? 2 : 1;
         points = count * 10 * mult + stolenTotal * 5;
-        this.score += points;
-        this.stats.captured += count;
-        this.stats.biggest = Math.max(this.stats.biggest, count);
+        e.score += points;
+        e.stats.captured += count;
+        e.stats.biggest = Math.max(e.stats.biggest, count);
       }
       this.emit('capture', { id: e.id, cells: res.cells, count, origin, points, mult, stolen: stolenTotal, isPlayer: e.isPlayer });
       for (let k = 0; k < this.entities.length; k++) {
         const o = this.entities[k];
         if (o !== e && o.alive && this.grid.counts[o.id] === 0) this.kill(o, e, true);
       }
-      if (e.isPlayer && !this.demo && this.grid.percent(1) >= this.cfg.target) this.stageClear();
+      if (e.isPlayer && !this.demo && this.grid.percent(e.id) >= this.cfg.target) {
+        if (this.multi) this.finish('target', e); else this.stageClear();
+      }
     }
     kill(victim, killer, eliminated) {
       if (!victim.alive) return;
@@ -195,24 +219,29 @@
       this.grid.clearTrail(victim.trail); victim.trail = [];
       let cleared = [];
       if (!victim.isPlayer) cleared = this.grid.clearOwner(victim.id);
-      else if (!this.demo) { this.lives--; this.stats.deaths++; }
+      else if (!this.demo) {
+        victim.lives--; victim.stats.deaths++;
+        if (this.multi && victim.lives <= 0) { victim.out = true; cleared = this.grid.clearOwner(victim.id); }
+      }
       let points = 0;
       if (killer && killer !== victim) {
         killer.kills++;
         if (killer.isPlayer && !this.demo) {
           points = eliminated ? 800 : 500;
-          this.score += points; this.killScore += points; this.stats.kills++;
+          killer.score += points; killer.killScore += points; killer.stats.kills++;
         }
       }
       this.emit('death', {
         id: victim.id, x: pos.x, y: pos.y, color: victim.color, isPlayer: victim.isPlayer,
-        cleared, killerId: killer ? killer.id : 0, suicide: killer === victim, eliminated: !!eliminated, points
+        cleared, killerId: killer ? killer.id : 0, suicide: killer === victim, eliminated: !!eliminated, points, out: victim.out
       });
-      if (victim.isPlayer && !this.demo && this.lives <= 0 && this.state === 'playing') {
+      if (!this.multi && victim.isPlayer && !this.demo && victim.lives <= 0 && this.state === 'playing') {
         this.state = 'dying'; this.overTimer = 2.2;
       }
+      if (this.multi && victim.out) this.checkElimination();
     }
     respawn(e) {
+      if (e.out) return;
       const g = this.grid;
       let sx, sy;
       let own = null;
@@ -238,6 +267,7 @@
       if (e.ai) e.ai.reset();
       this.emit('respawn', { id: e.id, x: sx, y: sy, isPlayer: e.isPlayer });
     }
+    /* ---------- 단일 플레이: 스테이지 클리어 ---------- */
     stageClear() {
       this.state = 'clear';
       const cfg = this.cfg;
@@ -249,8 +279,27 @@
       this.emit('stageClear', {
         stageId: cfg.id, captureScore: this.score - this.killScore, killScore: this.killScore,
         timeBonus, lifeBonus, stageTotal, runTotal: this.runScore + stageTotal, stars,
-        timeLeft, percent: this.grid.percent(1), stats: this.stats, lives: this.lives
+        timeLeft, percent: this.grid.percent(this.player.id), stats: this.stats, lives: this.lives
       });
+    }
+    /* ---------- 멀티플레이: 승패 ---------- */
+    /* 사람 참가자가 둘 이상이면 한 명만 남았을 때, 혼자면 탈락했을 때 끝난다 */
+    checkElimination() {
+      const humans = this.entities.filter((e) => e.isPlayer);
+      const left = humans.filter((e) => !e.out);
+      if (humans.length >= 2 ? left.length <= 1 : left.length === 0) this.finish('elim', left[0] || null);
+    }
+    /* reason: 'target'(목표 점령률 도달) | 'time'(시간 종료, 점령률 순위) | 'elim'(마지막 생존자) */
+    finish(reason, by) {
+      if (this.state !== 'playing') return;
+      this.state = 'over';
+      const ranking = this.entities.map((e) => ({
+        id: e.id, name: e.name, color: e.color, bot: !e.isPlayer, out: e.out,
+        percent: this.grid.percent(e.id), score: e.score, kills: e.kills, deaths: e.deaths
+      }));
+      ranking.sort((a, b) => (a.out - b.out) || (b.percent - a.percent) || (b.score - a.score));
+      if (by) { const k = ranking.findIndex((r) => r.id === by.id); if (k > 0) ranking.unshift(ranking.splice(k, 1)[0]); }
+      this.emit('matchOver', { reason, ranking, winnerId: ranking[0].id, time: this.time, elapsed: this.elapsed });
     }
   }
   window.Game = Game;

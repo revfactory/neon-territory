@@ -282,7 +282,8 @@
         new T.LineBasicMaterial({ color: col.clone().multiplyScalar(1.8), transparent: true, opacity: 0.65 }));
       wire.position.y = 0.45; grp.add(wire);
       const spr = new T.Sprite(new T.SpriteMaterial({ map: this.glowTex, color: col, transparent: true, blending: T.AdditiveBlending, depthWrite: false, opacity: 0.35 }));
-      spr.scale.set(e.isPlayer ? 2.4 : 2.0, e.isPlayer ? 2.4 : 2.0, 1); spr.position.y = 0.45; grp.add(spr);
+      const mine = !!(this.game && e === this.game.player);
+      spr.scale.set(mine ? 2.4 : 2.0, mine ? 2.4 : 2.0, 1); spr.position.y = 0.45; grp.add(spr);
       grp.userData = { core, ring, wire, spr, heading: 0 };
       this.scene.add(grp);
       return grp;
@@ -401,7 +402,7 @@
         ud.spr.material.opacity = 0.25 + 0.12 * Math.sin(this.time * 7 + e.id);
         if (e.trail.length && moving && Math.random() < 0.7)
           this.particles.emit(wx, 0.3, wz, this.colors[e.id].base, 1, { speed: 0.4, up: 1.4, life: 0.7, size: 0.4, grav: 0.8, spread: 0.2 });
-        if (e.isPlayer) { this.playerLight.position.set(wx, 1.6, wz); this.lastPlayerPos = { x: wx, z: wz }; }
+        if (e === this.game.player) { this.playerLight.position.set(wx, 1.6, wz); this.lastPlayerPos = { x: wx, z: wz }; }
       }
     }
     updateDust(dt) {

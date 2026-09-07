@@ -22,6 +22,13 @@
       const inp = $('#name-input');
       inp.addEventListener('input', () => { inp.value = inp.value.toUpperCase().replace(/[^A-Z0-9가-힣ㄱ-ㅎ]/g, '').slice(0, 3); });
       inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') this.submitName(); });
+      ['#lobby-name', '#lobby-code'].forEach((sel) => {
+        const el = $(sel);
+        el.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') this.action(sel === '#lobby-code' ? 'mp-join' : 'mp-create'); });
+      });
+      $('#lobby-code').addEventListener('input', () => { const el = $('#lobby-code'); el.value = el.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4); });
+      $('#lobby-name').value = Storage.settings.nick || '';
+      $('#room-bots').addEventListener('change', (e) => Net.setBots(+e.target.value));
       this.syncSettings();
       this.renderTitle();
     },
@@ -32,12 +39,28 @@
       if (name === 'stages') this.renderStages();
       if (name === 'scores') this.renderScores();
       if (name === 'title') this.renderTitle();
+      if (name === 'pause') $('#btn-pause-retry').hidden = !!(this.app.game && this.app.game.multi);
     },
     action(a, el) {
       const app = this.app;
       if (this.current === 'over' && !this.submitted && (a === 'retry' || a === 'title' || a === 'scores')) this.submitName(true);
       switch (a) {
         case 'start': app.startRun(1); break;
+        case 'multi': app.openLobby(); break;
+        case 'mp-create': { const n = this.nick(); if (n) Net.connect().then(() => Net.create(n)).catch(() => {}); break; }
+        case 'mp-join': {
+          const n = this.nick(), code = ($('#lobby-code').value || '').toUpperCase().trim();
+          if (!n) break;
+          if (code.length < 4) { this.lobbyStatus('방 코드 4자를 입력해 주세요', true); break; }
+          Net.connect().then(() => Net.join(code, n)).catch(() => {});
+          break;
+        }
+        case 'mp-ready': { const l = Net.lobby, me = l && l.players.find((p) => p.pid === l.you); Net.ready(!(me && me.ready)); break; }
+        case 'mp-start': Net.start(); break;
+        case 'mp-leave': Net.leave(); this.renderLobby(null); break;
+        case 'mp-copy': this.copyInvite(); break;
+        case 'mp-back': Net.leave(); this.show('title'); break;
+        case 'mp-again': app.openLobby(); break;
         case 'continue': app.startRun(Storage.data.unlocked); break;
         case 'stages': this.show('stages'); break;
         case 'scores': this.show('scores'); break;
@@ -122,7 +145,7 @@
     resetHUD(game) {
       this.last = {};
       const h = this.hud;
-      h.stage.textContent = String(game.cfg.id).padStart(2, '0');
+      h.stage.textContent = game.multi ? 'VS' : String(game.cfg.id).padStart(2, '0');
       h.target.textContent = game.cfg.target + '%';
       h.pctFill.style.width = '0%';
       h.pct.textContent = '0.0%';
@@ -137,7 +160,7 @@
     updateHUD(game) {
       if (!game || game.demo || (this.current !== 'hud' && this.current !== 'pause')) return;
       const h = this.hud, L = this.last;
-      const pct = game.grid.percent(1), pr = Math.floor(pct * 10) / 10;
+      const pct = game.grid.percent(game.player.id), pr = Math.floor(pct * 10) / 10;
       if (L.pct !== pr) {
         L.pct = pr; h.pct.textContent = pr.toFixed(1) + '%';
         h.pctFill.style.width = Math.min(100, pct / game.cfg.target * 100) + '%';
@@ -159,8 +182,10 @@
       if (!L.en || now - L.en > 250) {
         L.en = now; let s = '';
         for (const e of game.entities) {
-          if (e.isPlayer) continue;
-          s += '<span class="chip' + (e.alive ? '' : ' dead') + '"><i style="background:' + hex(e.color) + ';color:' + hex(e.color) + '"></i>' + game.grid.percent(e.id).toFixed(0) + '%</span>';
+          if (e === game.player) continue;
+          const dead = game.multi ? e.out : !e.alive;
+          s += '<span class="chip' + (dead ? ' dead' : '') + '"><i style="background:' + hex(e.color) + ';color:' + hex(e.color) + '"></i>' +
+            (game.multi ? esc(e.name) + (e.isPlayer && !e.connected ? '(AI)' : '') + ' ' : '') + game.grid.percent(e.id).toFixed(0) + '%</span>';
         }
         h.enemies.innerHTML = s;
       }
@@ -182,12 +207,13 @@
       clearTimeout(this._bt); this._bt = setTimeout(() => { b.className = 'banner'; }, dur || 900);
     },
     showIntro(cfg) {
-      $('#intro-num').textContent = String(cfg.id).padStart(2, '0');
+      $('#intro-stage').innerHTML = cfg.multi ? 'BATTLE' : 'STAGE <span id="intro-num">' + String(cfg.id).padStart(2, '0') + '</span>';
       $('#intro-name').textContent = cfg.name;
       $('#intro-en').textContent = cfg.en;
       $('#intro-target').textContent = cfg.target + '%';
       $('#intro-time').textContent = cfg.time + '초';
-      $('#intro-enemies').textContent = cfg.enemies + '기';
+      $('#intro-enemies').textContent = cfg.multi ? ('참가 ' + cfg.humans + '명 · 봇 ' + cfg.enemies + '기') : (cfg.enemies + '기');
+      $('#intro-enemies-lbl').textContent = cfg.multi ? '' : '적 ';
       $('#intro').classList.add('on');
     },
     hideIntro() { $('#intro').classList.remove('on'); },
@@ -235,6 +261,76 @@
       $('#name-input').value = Storage.data.lastName || 'AAA';
       $('#btn-retry-over').hidden = !!allClear;
       if (d.total <= 0) this.submitted = true;
+    },
+    /* ---------- 멀티플레이 로비 ---------- */
+    nick() {
+      const el = $('#lobby-name');
+      const v = (el.value || '').replace(/[^\w가-힣ㄱ-ㅎㅏ-ㅣ .\-]/g, '').trim().slice(0, 8);
+      el.value = v;
+      if (!v) { this.lobbyStatus('닉네임을 입력해 주세요', true); el.focus(); return ''; }
+      Storage.setSetting('nick', v);
+      return v;
+    },
+    setJoinCode(code) { $('#lobby-code').value = String(code || '').toUpperCase().slice(0, 4); },
+    lobbyStatus(text, bad) {
+      const el = $('#lobby-status');
+      el.textContent = text || '';
+      el.classList.toggle('bad', !!bad);
+      if (bad) { clearTimeout(this._lt); this._lt = setTimeout(() => { if (el.classList.contains('bad')) this.renderLobby(Net.lobby); }, 4000); }
+    },
+    renderLobby(l) {
+      const entry = $('#lobby-entry'), room = $('#lobby-room');
+      if (!l) {
+        entry.hidden = false; room.hidden = true;
+        if (Net.ws && Net.ws.readyState === 1) this.lobbyStatus('방을 만들거나 코드로 참가하세요');
+        return;
+      }
+      entry.hidden = true; room.hidden = false;
+      $('#room-code').textContent = l.code;
+      const me = l.players.find((p) => p.pid === l.you);
+      const isHost = l.hostPid === l.you;
+      let h = '';
+      for (const p of l.players) {
+        h += '<div class="lp' + (p.connected ? '' : ' off') + '"><i style="background:' + hex(p.color) + ';color:' + hex(p.color) + '"></i>' +
+          '<span class="nm">' + esc(p.name) + (p.pid === l.you ? ' <em>(나)</em>' : '') + '</span>' +
+          '<span class="st' + (p.host || p.ready ? ' ok' : '') + '">' + (p.host ? '방장' : p.ready ? '준비 완료' : '대기 중') + '</span></div>';
+      }
+      for (let k = 0; k < l.bots; k++) h += '<div class="lp bot"><i></i><span class="nm">BOT ' + (k + 1) + '</span><span class="st">AI</span></div>';
+      $('#room-players').innerHTML = h;
+      const sel = $('#room-bots'); sel.value = String(l.bots); sel.disabled = !isHost;
+      $('#room-opts').classList.toggle('dim', !isHost);
+      const ready = $('#btn-ready'); ready.hidden = isHost; ready.textContent = me && me.ready ? '준비 취소' : '준비 완료';
+      ready.classList.toggle('primary', !(me && me.ready));
+      const others = l.players.filter((p) => p.pid !== l.hostPid);
+      const canStart = isHost && others.every((p) => p.ready) && (l.players.length + l.bots >= 2);
+      const start = $('#btn-mp-start'); start.hidden = !isHost; start.disabled = !canStart;
+      this.lobbyStatus(l.players.length + '/5명 참가' + (isHost
+        ? (canStart ? ' · 시작할 수 있습니다' : ' · 참가자가 모두 준비되면 시작할 수 있습니다')
+        : (me && me.ready ? ' · 방장이 시작하기를 기다리는 중' : ' · 준비 완료를 눌러 주세요')));
+    },
+    copyInvite() {
+      const url = location.origin + location.pathname + '?room=' + (Net.room || '');
+      const done = () => this.lobbyStatus('초대 링크를 복사했습니다: ' + url);
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, () => this.lobbyStatus(url));
+      else this.lobbyStatus(url);
+    },
+    showMatch(d, me) {
+      this.show('match');
+      const won = d.winnerId === me, mine = d.ranking.find((r) => r.id === me);
+      const title = $('#match-title');
+      title.textContent = won ? 'VICTORY' : mine && mine.out ? 'ELIMINATED' : 'MATCH OVER';
+      title.className = 'neon-h ' + (won ? 'gold' : 'danger');
+      const win = d.ranking[0];
+      $('#match-reason').textContent = d.reason === 'target' ? esc(win.name) + ' 이(가) 목표 점령률에 먼저 도달했습니다'
+        : d.reason === 'elim' ? esc(win.name) + ' 이(가) 마지막까지 살아남았습니다'
+        : '시간 종료 · 점령률 순위로 결정';
+      let h = '<table><tr><th>#</th><th>NAME</th><th>영역</th><th>SCORE</th><th>K/D</th></tr>';
+      d.ranking.forEach((r, i) => {
+        h += '<tr class="r' + (i + 1) + (r.id === me ? ' me' : '') + '"><td>' + (i + 1) + '</td>' +
+          '<td class="name"><i class="dot" style="background:' + hex(r.color) + ';color:' + hex(r.color) + '"></i>' + esc(r.name) + (r.id === me ? ' (나)' : '') + (r.out ? ' <s>OUT</s>' : '') + '</td>' +
+          '<td>' + r.percent.toFixed(1) + '%</td><td>' + fmt(r.score) + '</td><td>' + r.kills + '/' + r.deaths + '</td></tr>';
+      });
+      $('#match-board').innerHTML = h + '</table>';
     },
     submitName(silent) {
       if (this.submitted || !this.overData) return;
